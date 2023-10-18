@@ -68,6 +68,12 @@ func CombineLatest(f FuncN, observables []Observable, opts ...Option) Observable
 	ctx := option.buildContext(emptyContext)
 	next := option.buildChannel()
 
+	// subscribe synchronously to avoid race conditions
+	inputChans := make([]<-chan Item, 0, len(observables))
+	for _, observable := range observables {
+		inputChans = append(inputChans, observable.Observe(opts...))
+	}
+
 	go func() {
 		size := uint32(len(observables))
 		var counter uint32
@@ -79,7 +85,7 @@ func CombineLatest(f FuncN, observables []Observable, opts ...Option) Observable
 
 		handler := func(ctx context.Context, it Iterable, i int) {
 			defer wg.Done()
-			observe := it.Observe(opts...)
+			observe := inputChans[i] // it.Observe(opts...) //<-inputChans[i]:
 			for {
 				select {
 				case <-ctx.Done():
