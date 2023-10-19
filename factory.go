@@ -61,6 +61,16 @@ func Amb(observables []Observable, opts ...Option) Observable {
 	}
 }
 
+// observeAll observes a slice of observables and returns the channels
+func observeAll(observables []Observable, opts ...Option) []<-chan Item {
+	// subscribe synchronously to avoid race conditions
+	channels := make([]<-chan Item, 0, len(observables))
+	for _, observable := range observables {
+		channels = append(channels, observable.Observe(opts...))
+	}
+	return channels
+}
+
 // CombineLatest combines the latest item emitted by each Observable via a specified function
 // and emit items based on the results of this function.
 func CombineLatest(f FuncN, observables []Observable, opts ...Option) Observable {
@@ -69,10 +79,7 @@ func CombineLatest(f FuncN, observables []Observable, opts ...Option) Observable
 	next := option.buildChannel()
 
 	// subscribe synchronously to avoid race conditions
-	inputChans := make([]<-chan Item, 0, len(observables))
-	for _, observable := range observables {
-		inputChans = append(inputChans, observable.Observe(opts...))
-	}
+	channels := observeAll(observables)
 
 	go func() {
 		size := uint32(len(observables))
@@ -83,14 +90,13 @@ func CombineLatest(f FuncN, observables []Observable, opts ...Option) Observable
 		wg.Add(int(size))
 		errCh := make(chan struct{})
 
-		handler := func(ctx context.Context, it Iterable, i int) {
+		handler := func(ctx context.Context, it Iterable, channel <-chan Item, i int) {
 			defer wg.Done()
-			observe := inputChans[i] // it.Observe(opts...) //<-inputChans[i]:
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case item, ok := <-observe:
+				case item, ok := <-channel:
 					if !ok {
 						return
 					}
@@ -114,7 +120,7 @@ func CombineLatest(f FuncN, observables []Observable, opts ...Option) Observable
 
 		ctx, cancel := context.WithCancel(ctx)
 		for i, o := range observables {
-			go handler(ctx, o, i)
+			go handler(ctx, o, channels[i], i)
 		}
 
 		go func() {
@@ -262,6 +268,7 @@ func Merge(observables []Observable, opts ...Option) Observable {
 
 	f := func(o Observable) {
 		defer wg.Done()
+		// fix
 		observe := o.Observe(opts...)
 		for {
 			select {
@@ -367,3 +374,20 @@ func Timer(d Duration, opts ...Option) Observable {
 		iterable: newChannelIterable(next),
 	}
 }
+
+// SwitchMap 
+// TODO: flesh out description
+/*
+func SwitchMap(
+	observable Observable, 
+	mapFunc func(value interface{}) Observable,
+	opts ...Option,
+) Observable {
+	option := parseOptions(opts...)
+	ctx := option.buildContext(emptyContext)
+	next := option.buildChannel()
+
+	go func() {
+		defer close(next)
+	}()
+}*/
